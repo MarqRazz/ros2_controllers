@@ -54,19 +54,35 @@ bool Odometry::update(double left_pos, double right_pos, const rclcpp::Time & ti
     return false;  // Interval too small to integrate with
   }
 
-  // Get current wheel joint positions:
-  const double left_wheel_cur_pos = left_pos * left_wheel_radius_;
-  const double right_wheel_cur_pos = right_pos * right_wheel_radius_;
-
-  // Estimate velocity of wheels using old and current position:
-  const double left_wheel_est_vel = left_wheel_cur_pos - left_wheel_old_pos_;
-  const double right_wheel_est_vel = right_wheel_cur_pos - right_wheel_old_pos_;
-
+  double wheel_l = left_pos - left_wheel_old_pos_;
+  double wheel_r = right_pos - right_wheel_old_pos_;
   // Update old position with current:
-  left_wheel_old_pos_ = left_wheel_cur_pos;
-  right_wheel_old_pos_ = right_wheel_cur_pos;
+  left_wheel_old_pos_ = left_pos;
+  right_wheel_old_pos_ = right_pos;
 
-  updateFromVelocity(left_wheel_est_vel, right_wheel_est_vel, time);
+  double delta_s = left_wheel_radius_ * (wheel_r + wheel_l) / 2.0;
+  double theta = left_wheel_radius_ * (wheel_r - wheel_l) / wheel_separation_;
+
+  x_ = x_ + delta_s * cos(heading_ + (theta/2.0));
+  y_ = y_ + delta_s * sin(heading_ + (theta/2.0));
+  heading_ = heading_ + theta;
+
+  linear_ = delta_s / dt;
+  angular_ = theta / dt;
+
+  // // Get current wheel joint positions:
+  // const double left_wheel_cur_pos = left_pos * left_wheel_radius_;
+  // const double right_wheel_cur_pos = right_pos * right_wheel_radius_;
+
+  // // Estimate velocity of wheels using old and current position:
+  // const double left_wheel_est_vel = left_wheel_cur_pos - left_wheel_old_pos_;
+  // const double right_wheel_est_vel = right_wheel_cur_pos - right_wheel_old_pos_;
+
+  // // Update old position with current:
+  // left_wheel_old_pos_ = left_wheel_cur_pos;
+  // right_wheel_old_pos_ = right_wheel_cur_pos;
+
+  // updateFromVelocity(left_wheel_est_vel, right_wheel_est_vel, time);
 
   return true;
 }
