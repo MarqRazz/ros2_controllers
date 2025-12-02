@@ -193,6 +193,12 @@ joint_trajectory_controller:
       default_value: 0.01,
       description: "Velocity tolerance for at the end of the trajectory that indicates that controlled system is stopped.",
     }
+    decelerate_on_cancel: {
+      type: bool,
+      default_value: false,
+      description: "If true and each joints max_deceleration_on_cancel is greater than 0,
+        decelerate to a stop when the request is canceled.",
+    }
     goal_time: {
       type: double,
       default_value: 0.0,
@@ -212,4 +218,12 @@ joint_trajectory_controller:
         type: double,
         default_value: 0.0,
         description: "Per-joint trajectory offset tolerance at the goal position.",
+      }
+      max_deceleration_on_cancel: {
+        type: double,
+        default_value: 0.0,
+        description: "Per-joint max deceleration used to calculate the holding position when a cancel request is received.",
+        validation: {
+          gt_eq: [0.0]
+        }
       }

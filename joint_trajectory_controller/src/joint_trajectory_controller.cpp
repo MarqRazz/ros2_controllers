@@ -1303,8 +1303,16 @@ rclcpp_action::CancelResponse JointTrajectoryController::goal_cancelled_callback
     active_goal->setCanceled(action_res);
     rt_active_goal_.writeFromNonRT(RealtimeGoalHandlePtr());
 
-    // Enter hold current position mode
-    add_new_trajectory_msg(set_hold_position());
+    if (params_.constraints.decelerate_on_cancel)
+    {
+      // calculate stopping position based on max deceleration
+      add_new_trajectory_msg(decelerate_to_hold_position());
+    }
+    else
+    {
+      // hold current position
+      add_new_trajectory_msg(set_hold_position());
+    }
   }
   return rclcpp_action::CancelResponse::ACCEPT;
 }
@@ -1693,6 +1701,52 @@ JointTrajectoryController::set_hold_position()
 {
   // Command to stay at current position
   hold_position_msg_ptr_->points[0].positions = state_current_.positions;
+  hold_position_msg_ptr_->points[0].time_from_start = rclcpp::Duration(0, 0);
+
+  // set flag, otherwise tolerances will be checked with holding position too
+  rt_is_holding_ = true;
+
+  return hold_position_msg_ptr_;
+}
+
+std::shared_ptr<trajectory_msgs::msg::JointTrajectory>
+JointTrajectoryController::decelerate_to_hold_position()
+{
+  rclcpp::Duration max_ramp_time(0, 0);
+  // Calculate the holding position given max deceleration
+  for (size_t i = 0; i < num_cmd_joints_; ++i)
+  {
+    const double current_pos = state_current_.positions[i];
+    const double current_vel = state_current_.velocities[i];
+    const double max_decel =
+      params_.constraints.joints_map.at(params_.joints[i]).max_deceleration_on_cancel;
+    // if the user has not set a valid max_decel value fall back to set_hold_position
+    if (max_decel <= 0.0)
+    {
+      RCLCPP_WARN(
+        get_node()->get_logger(),
+        "Joint [%s] does not have a valid max_deceleration_on_cancel value [%.2f]. "
+        "Falling back to current hold position",
+        params_.joints[i].c_str(), max_decel);
+      return set_hold_position();
+    }
+    double time_to_stop = std::abs(current_vel) / max_decel;
+    auto stop_distance = (current_vel * current_vel) / (2 * max_decel);
+    hold_position_msg_ptr_->points[0].positions[i] =
+      current_pos + current_vel / abs(current_vel) * stop_distance;
+    if (time_to_stop > max_ramp_time.seconds())
+    {
+      max_ramp_time = rclcpp::Duration::from_seconds(time_to_stop);
+    }
+    RCLCPP_ERROR(
+      get_node()->get_logger(),
+      "Joint [%s] max deceleration [%.3f], stop distance [%.3f], current vel [%.3f], current pos "
+      "[%.3f], hold pos [%.3f]",
+      params_.joints[i].c_str(), max_decel, stop_distance, current_vel, current_pos,
+      hold_position_msg_ptr_->points[0].positions[i]);
+  }
+  RCLCPP_ERROR(get_node()->get_logger(), "Max deceleration time [%.3f]", max_ramp_time.seconds());
+  hold_position_msg_ptr_->points[0].time_from_start = max_ramp_time;
 
   // set flag, otherwise tolerances will be checked with holding position too
   rt_is_holding_ = true;
