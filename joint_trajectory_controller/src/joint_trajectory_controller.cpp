@@ -1701,7 +1701,6 @@ JointTrajectoryController::set_hold_position()
 {
   // Command to stay at current position
   hold_position_msg_ptr_->points[0].positions = state_current_.positions;
-  hold_position_msg_ptr_->points[0].time_from_start = rclcpp::Duration(0, 0);
 
   // set flag, otherwise tolerances will be checked with holding position too
   rt_is_holding_ = true;
@@ -1712,46 +1711,102 @@ JointTrajectoryController::set_hold_position()
 std::shared_ptr<trajectory_msgs::msg::JointTrajectory>
 JointTrajectoryController::decelerate_to_hold_position()
 {
-  rclcpp::Duration max_ramp_time(0, 0);
-  // Calculate the holding position given max deceleration
-  for (size_t i = 0; i < num_cmd_joints_; ++i)
+  const double dt = update_period_.seconds();
+  const size_t n = num_cmd_joints_;
+
+  // Precompute per-joint decel, stop time, and hold position
+  std::vector<double> p0(n), v0(n), a(n), t_stop(n), p_hold(n), sgn(n);
+  double max_t_stop = 0.0;
+  for (size_t i = 0; i < n; ++i)
   {
-    const double current_pos = state_current_.positions[i];
-    const double current_vel = state_current_.velocities[i];
-    const double max_decel =
-      params_.constraints.joints_map.at(params_.joints[i]).max_deceleration_on_cancel;
-    // if the user has not set a valid max_decel value fall back to set_hold_position
-    if (max_decel <= 0.0)
+    p0[i] = state_current_.positions[i];
+    v0[i] = state_current_.velocities[i];
+    a[i] = params_.constraints.joints_map.at(params_.joints[i]).max_deceleration_on_cancel;
+
+    if (a[i] <= 0.0)
     {
       RCLCPP_WARN(
         get_node()->get_logger(),
-        "Joint [%s] does not have a valid max_deceleration_on_cancel value [%.2f]. "
-        "Falling back to current hold position",
-        params_.joints[i].c_str(), max_decel);
+        "Joint [%s] invalid max_deceleration_on_cancel [%.3f]. Falling back to hold position.",
+        params_.joints[i].c_str(), a[i]);
       return set_hold_position();
     }
-    double time_to_stop = std::abs(current_vel) / max_decel;
-    auto stop_distance = (current_vel * current_vel) / (2 * max_decel);
-    hold_position_msg_ptr_->points[0].positions[i] =
-      current_pos + current_vel / abs(current_vel) * stop_distance;
-    if (time_to_stop > max_ramp_time.seconds())
-    {
-      max_ramp_time = rclcpp::Duration::from_seconds(time_to_stop);
-    }
-    RCLCPP_ERROR(
+    sgn[i] = (v0[i] >= 0.0) ? 1.0 : -1.0;
+
+    // Time to stop (constant decel)
+    t_stop[i] = std::abs(v0[i]) / a[i];
+    max_t_stop = std::max(max_t_stop, t_stop[i]);
+
+    // Analytical stop distance and hold position
+    const double stop_distance = (v0[i] * v0[i]) / (2.0 * a[i]);
+    p_hold[i] = p0[i] + sgn[i] * stop_distance;
+
+    RCLCPP_DEBUG(
       get_node()->get_logger(),
-      "Joint [%s] max deceleration [%.3f], stop distance [%.3f], current vel [%.3f], current pos "
-      "[%.3f], hold pos [%.3f]",
-      params_.joints[i].c_str(), max_decel, stop_distance, current_vel, current_pos,
-      hold_position_msg_ptr_->points[0].positions[i]);
+      "Joint [%s] decel [%.3f], stop dist [%.6f], v0 [%.6f], p0 [%.6f], hold [%.6f], t_stop [%.6f]",
+      params_.joints[i].c_str(), a[i], stop_distance, v0[i], p0[i], p_hold[i], t_stop[i]);
   }
-  RCLCPP_ERROR(get_node()->get_logger(), "Max deceleration time [%.3f]", max_ramp_time.seconds());
-  hold_position_msg_ptr_->points[0].time_from_start = max_ramp_time;
+
+  // recalculate the acceleration for each joint given the max stop time
+  // a[i] = abs(v0[i]) / max_t_stop;
+
+  // Prepare output trajectory
+  auto traj = std::make_shared<trajectory_msgs::msg::JointTrajectory>();
+  traj->joint_names = params_.joints;
+  traj->points.clear();
+  // Number of points at multiples of dt (include initial point at t=0)
+  const size_t num_points = static_cast<size_t>(std::ceil(max_t_stop / dt)) + 1;
+  traj->points.reserve(num_points);
+
+  // Build traj points that ramp to zero velocity
+  for (size_t k = 0; k < num_points; ++k)
+  {
+    const double t = static_cast<double>(k) * dt;
+
+    trajectory_msgs::msg::JointTrajectoryPoint pt;
+    pt.positions.resize(n);
+    pt.velocities.resize(n);
+    pt.accelerations.resize(n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+      if (t < t_stop[i] && std::abs(v0[i]) > 0.0)
+      {
+        // Constant deceleration
+        // v(t) = v0 - sgn * a * t
+        double v = v0[i] - sgn[i] * a[i] * t;
+        // Guard against numerical crossing
+        if ((v * sgn[i]) < 0.0) v = 0.0;
+
+        // p(t) = p0 + v0 * t - 0.5 * sgn * a * t^2
+        const double p = p0[i] + v0[i] * t - 0.5 * sgn[i] * a[i] * t * t;
+
+        pt.positions[i] = p;
+        pt.velocities[i] = v;
+        pt.accelerations[i] = -sgn[i] * a[i];
+      }
+      else
+      {
+        // Already stopped (or has zero initial velocity): hold position and zero velocities/accels
+        pt.positions[i] = p_hold[i];
+        pt.velocities[i] = 0.0;
+        pt.accelerations[i] = 0.0;
+      }
+    }
+
+    pt.time_from_start = rclcpp::Duration::from_seconds(t);
+    traj->points.emplace_back(std::move(pt));
+  }
+
+  RCLCPP_INFO(
+    get_node()->get_logger(),
+    "Created ramped cancel trajectory with [%zu] points and max time to stop [%.3f]",
+    traj->points.size(), max_t_stop);
 
   // set flag, otherwise tolerances will be checked with holding position too
   rt_is_holding_ = true;
 
-  return hold_position_msg_ptr_;
+  return traj;
 }
 
 std::shared_ptr<trajectory_msgs::msg::JointTrajectory>
