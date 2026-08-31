@@ -1,3 +1,19 @@
+> **NOTE — stripped verification branch**
+>
+> This branch exists only to verify one JTC fix on hardware. **Every package except
+> `joint_trajectory_controller` has been deleted** so the repo builds in seconds; do not merge it
+> anywhere or treat it as a normal `jazzy` checkout.
+>
+> The fix: on action cancel, JTC holds the **last commanded** position instead of the **measured**
+> one. Anchoring the hold to feedback steps the commanded position backwards by exactly the
+> following error in a single control period, which downstream reads as a very large acceleration
+> (measured ~-397 rad/s^2 on a joint limited to 1.32). The five fault paths and the initial hold in
+> `on_activate` deliberately still use the measured state.
+>
+> Note that upstream `jazzy` has no `decelerate_on_cancel` feature, so only the
+> `set_hold_position()` path exists here -- which is the path that failed identically with
+> `decelerate_on_cancel:=false`.
+
 # ros2_controllers
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)

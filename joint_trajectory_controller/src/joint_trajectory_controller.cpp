@@ -14,7 +14,9 @@
 
 #include "joint_trajectory_controller/joint_trajectory_controller.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <numeric>
@@ -1303,8 +1305,9 @@ rclcpp_action::CancelResponse JointTrajectoryController::goal_cancelled_callback
     active_goal->setCanceled(action_res);
     rt_active_goal_.writeFromNonRT(RealtimeGoalHandlePtr());
 
-    // Enter hold current position mode
-    add_new_trajectory_msg(set_hold_position());
+    // The robot was tracking when the cancel arrived, so hold the last commanded position to keep
+    // the command stream continuous. Fault paths deliberately keep using the measured state.
+    add_new_trajectory_msg(set_hold_position(true));
   }
   return rclcpp_action::CancelResponse::ACCEPT;
 }
@@ -1688,11 +1691,53 @@ void JointTrajectoryController::preempt_active_goal()
   }
 }
 
-std::shared_ptr<trajectory_msgs::msg::JointTrajectory>
-JointTrajectoryController::set_hold_position()
+const trajectory_msgs::msg::JointTrajectoryPoint & JointTrajectoryController::select_hold_anchor(
+  const bool from_last_command) const
 {
-  // Command to stay at current position
-  hold_position_msg_ptr_->points[0].positions = state_current_.positions;
+  // state_current_ is feedback and lags the command by the following error. Anchoring a hold to it
+  // steps the command stream back by that error in one cycle, which downstream reads as a huge
+  // acceleration. last_commanded_state_ is what was last written, so it keeps the stream continuous.
+  if (
+    from_last_command && last_commanded_state_.positions.size() >= num_cmd_joints_ &&
+    std::all_of(
+      last_commanded_state_.positions.cbegin(),
+      last_commanded_state_.positions.cbegin() + static_cast<std::ptrdiff_t>(num_cmd_joints_),
+      [](double x) { return std::isfinite(x); }))
+  {
+    return last_commanded_state_;
+  }
+  return state_current_;
+}
+
+std::shared_ptr<trajectory_msgs::msg::JointTrajectory>
+JointTrajectoryController::set_hold_position(const bool from_last_command)
+{
+  // Command to stay at current position. Never latch a non-finite position -- it would be written
+  // straight to the command interfaces; keep the previous target for those joints instead.
+  const auto & source = select_hold_anchor(from_last_command).positions;
+  auto & hold = hold_position_msg_ptr_->points[0].positions;
+  if (hold.size() != source.size())
+  {
+    hold.assign(source.size(), std::numeric_limits<double>::quiet_NaN());
+  }
+  bool all_finite = true;
+  for (size_t i = 0; i < source.size(); ++i)
+  {
+    if (std::isfinite(source[i]))
+    {
+      hold[i] = source[i];
+    }
+    else
+    {
+      all_finite = false;
+    }
+  }
+  if (!all_finite)
+  {
+    RCLCPP_ERROR_THROTTLE(
+      get_node()->get_logger(), *get_node()->get_clock(), 1000,
+      "Measured position contains non-finite values; holding the last valid target instead.");
+  }
 
   // set flag, otherwise tolerances will be checked with holding position too
   rt_is_holding_ = true;
