@@ -2,6 +2,42 @@
 Changelog for package joint_trajectory_controller
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+4.40.1 (2026-05-12)
+-------------------
+* Suppress cppcheck errors from macros from version.h (backport `#2346 <https://github.com/ros-controls/ros2_controllers/issues/2346>`_) (`#2347 <https://github.com/ros-controls/ros2_controllers/issues/2347>`_)
+* fix JTC userdoc YAML indentation and stray quote (backport `#2327 <https://github.com/ros-controls/ros2_controllers/issues/2327>`_) (`#2329 <https://github.com/ros-controls/ros2_controllers/issues/2329>`_)
+* Contributors: mergify[bot]
+
+4.40.0 (2026-04-22)
+-------------------
+* Fix segfault in jtc if joint name not in urdf (backport `#2321 <https://github.com/ros-controls/ros2_controllers/issues/2321>`_) (`#2323 <https://github.com/ros-controls/ros2_controllers/issues/2323>`_)
+* Contributors: mergify[bot]
+
+4.39.0 (2026-04-04)
+-------------------
+* Add decelerate to stop functionality when trajectory is canceled or preempted (backport `#2163 <https://github.com/ros-controls/ros2_controllers/issues/2163>`_) (`#2222 <https://github.com/ros-controls/ros2_controllers/issues/2222>`_)
+* Scaled jtc (backport `#1191 <https://github.com/ros-controls/ros2_controllers/issues/1191>`_) (`#2105 <https://github.com/ros-controls/ros2_controllers/issues/2105>`_)
+* GPL custom validator: Use tl_expected from libexpected-dev instead (backport `#2212 <https://github.com/ros-controls/ros2_controllers/issues/2212>`_) (`#2239 <https://github.com/ros-controls/ros2_controllers/issues/2239>`_)
+* Contributors: mergify[bot]
+
+4.38.0 (2026-03-12)
+-------------------
+* Consistently add <cmath> include with define for windows (backport `#2193 <https://github.com/ros-controls/ros2_controllers/issues/2193>`_) (`#2195 <https://github.com/ros-controls/ros2_controllers/issues/2195>`_)
+* Contributors: mergify[bot]
+
+4.37.0 (2026-02-03)
+-------------------
+
+4.36.0 (2025-12-31)
+-------------------
+* Controller interface api update to ros2_controller packages (backport `#1973 <https://github.com/ros-controls/ros2_controllers/issues/1973>`_) (`#2068 <https://github.com/ros-controls/ros2_controllers/issues/2068>`_)
+* Use get_lifecycle_id instead of get_lifecycle_state (backport `#2053 <https://github.com/ros-controls/ros2_controllers/issues/2053>`_) (`#2055 <https://github.com/ros-controls/ros2_controllers/issues/2055>`_)
+* Fill point_before_trajectory with same information as trajectory (backport `#2043 <https://github.com/ros-controls/ros2_controllers/issues/2043>`_) (`#2050 <https://github.com/ros-controls/ros2_controllers/issues/2050>`_)
+* Contributors: mergify[bot]
+
+4.35.0 (2025-12-01)
+-------------------
+
 4.34.0 (2025-11-10)
 -------------------
 * Add missing dependency rclcpp_action (backport `#1992 <https://github.com/ros-controls/ros2_controllers/issues/1992>`_) (`#1994 <https://github.com/ros-controls/ros2_controllers/issues/1994>`_)
