@@ -1997,8 +1997,22 @@ std::shared_ptr<trajectory_msgs::msg::JointTrajectory>
 JointTrajectoryController::decelerate_to_hold_position()
 {
   double max_t_stop = 0.0;
-  const auto & p0 = state_current_.positions;
-  const auto & v0 = state_current_.velocities;
+  // Anchor the ramp to the last COMMANDED point, for the same reason set_hold_position()
+  // does: state_current_ is feedback and lags the command by the following error, so
+  // starting the stop trajectory there steps the command stream back by that error in a
+  // single control period.
+  const auto & anchor = select_hold_anchor(true);
+  const auto & p0 = anchor.positions;
+  // Take v0 from the same anchor when it carries a usable set: pairing a commanded p0 with
+  // a measured v0 leaves a slope discontinuity at the join. Fall back to the measured
+  // velocities when the anchor has none, which is also what select_hold_anchor() returns.
+  const bool anchor_has_velocities =
+    anchor.velocities.size() >= num_cmd_joints_ &&
+    std::all_of(
+      anchor.velocities.cbegin(),
+      anchor.velocities.cbegin() + static_cast<std::ptrdiff_t>(num_cmd_joints_),
+      [](double x) { return std::isfinite(x); });
+  const auto & v0 = anchor_has_velocities ? anchor.velocities : state_current_.velocities;
   for (size_t i = 0; i < num_cmd_joints_; ++i)
   {
     stop_direction_[i] = (v0[i] >= 0.0) ? 1.0 : -1.0;
