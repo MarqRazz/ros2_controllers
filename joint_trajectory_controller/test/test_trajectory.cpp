@@ -784,6 +784,47 @@ TEST(TestTrajectory, fill_point_before_with_same_degree_as_traj)
   }
 }
 
+// A hardware component can declare a velocity state interface and never write it; the handle then
+// reads back NaN instead of being empty. set_point_before_trajectory_msg only zero-fills velocities
+// when the current point's velocity vector is *empty*, so a present-but-NaN vector passes through
+// untouched and corrupts the whole first segment's cubic/quintic sampling, not just the one joint's
+// initial point.
+TEST(TestTrajectory, fill_point_before_zero_fills_non_finite_velocity)
+{
+  auto full_msg = std::make_shared<trajectory_msgs::msg::JointTrajectory>();
+  full_msg->header.stamp = rclcpp::Time(0);
+
+  trajectory_msgs::msg::JointTrajectoryPoint p1;
+  p1.time_from_start = rclcpp::Duration::from_seconds(1.0);
+  p1.positions.push_back(1.0);
+  p1.velocities.push_back(0.0);
+  full_msg->points.push_back(p1);
+
+  trajectory_msgs::msg::JointTrajectoryPoint p2;
+  p2.time_from_start = rclcpp::Duration::from_seconds(2.0);
+  p2.positions.push_back(2.0);
+  p2.velocities.push_back(0.0);
+  full_msg->points.push_back(p2);
+
+  // Declared (non-empty) but never written: reads back NaN, unlike the "no velocity interface at
+  // all" case which is represented by an empty vector.
+  trajectory_msgs::msg::JointTrajectoryPoint point_before_msg;
+  point_before_msg.time_from_start = rclcpp::Duration::from_seconds(0.0);
+  point_before_msg.positions.push_back(0.0);
+  point_before_msg.velocities.push_back(std::numeric_limits<double>::quiet_NaN());
+
+  const rclcpp::Time time_now = rclcpp::Clock().now();
+  auto traj = joint_trajectory_controller::Trajectory(time_now, point_before_msg, full_msg);
+
+  trajectory_msgs::msg::JointTrajectoryPoint expected_state;
+  joint_trajectory_controller::TrajectoryPointConstIter start, end;
+  traj.sample(time_now, DEFAULT_INTERPOLATION, expected_state, start, end);
+
+  EXPECT_TRUE(std::isfinite(expected_state.positions[0]))
+    << "commanded position must stay finite even though the measured velocity was NaN, got "
+    << expected_state.positions[0];
+}
+
 TEST(TestTrajectory, skip_interpolation)
 {
   // Simple passthrough without extra interpolation
