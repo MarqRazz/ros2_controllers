@@ -62,6 +62,7 @@ joint_trajectory_controller
   <https://github.com/ros-controls/ros2_controllers/pull/TODO_PR_FIRST_SEGMENT_NAN>`_)
 * ``set_hold_position``/``decelerate_to_hold_position`` now refuse to build a hold or a deceleration ramp from a non-finite measured position or velocity (a state interface a hardware component declared but never wrote), logging instead of silently commanding NaN to the hardware. (`#TODO_PR_HOLD_GUARD
   <https://github.com/ros-controls/ros2_controllers/pull/TODO_PR_HOLD_GUARD>`_)
+* On cancel, the hold / decelerate-to-stop point is now anchored to the last commanded state instead of the measured one, so the command stream stays continuous across the transition. (`#2587 <https://github.com/ros-controls/ros2_controllers/pull/2587>`_)
 
 pid_controller
 **************

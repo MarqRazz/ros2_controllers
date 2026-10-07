@@ -14,6 +14,7 @@
 
 #include "joint_trajectory_controller/joint_trajectory_controller.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <functional>
@@ -1595,15 +1596,21 @@ rclcpp_action::CancelResponse JointTrajectoryController::goal_cancelled_callback
     active_goal->setCanceled(action_res);
     rt_active_goal_.set([](auto & goal) { goal = RealtimeGoalHandlePtr(); });
 
+    // The robot was tracking when the cancel arrived, so anchor the stop to the last commanded
+    // point rather than the measured one; see select_hold_anchor(). Fault paths (cmd_timeout,
+    // tolerance violations, goal time exceeded) deliberately keep anchoring to the measured
+    // state instead -- after one of those the robot has demonstrably failed to track, and
+    // latching an unreachable command would sustain the error rather than give up where the
+    // robot actually is.
     if (should_decelerate_on_cancel_)
     {
       // calculate stopping position based on max deceleration
-      add_new_trajectory_msg(decelerate_to_hold_position());
+      add_new_trajectory_msg(decelerate_to_hold_position(true));
     }
     else
     {
-      // hold current position
-      add_new_trajectory_msg(set_hold_position());
+      // hold last commanded position
+      add_new_trajectory_msg(set_hold_position(true));
     }
   }
   return rclcpp_action::CancelResponse::ACCEPT;
@@ -2186,22 +2193,44 @@ void JointTrajectoryController::preempt_active_goal()
   }
 }
 
-std::shared_ptr<trajectory_msgs::msg::JointTrajectory>
-JointTrajectoryController::set_hold_position()
+trajectory_msgs::msg::JointTrajectoryPoint JointTrajectoryController::select_hold_anchor(
+  const bool from_last_command) const
 {
-  // Command to stay at current position. A hardware component can declare a state interface and
-  // never write it, leaving NaN in the handle; never latch that straight into the command
+  // state_current_ is feedback and lags the command by the following error. Anchoring a stop to
+  // it steps the command stream back by that error in a single control period -- small as a
+  // position, enormous as an acceleration. last_commanded_state_ is what was last written to the
+  // command interfaces, so it keeps the stream continuous. Only usable while the robot is still
+  // tracking, which is what from_last_command asserts; fall back to the measured state if it
+  // does not look sane. goal_cancelled_callback runs off the RT thread, so take the realtime-safe
+  // snapshot (rt_last_commanded_state_) rather than the raw last_commanded_state_ member.
+  if (from_last_command)
+  {
+    const auto commanded = rt_last_commanded_state_.get();
+    if (all_finite(commanded.positions, num_cmd_joints_))
+    {
+      return commanded;
+    }
+  }
+  return state_current_;
+}
+
+std::shared_ptr<trajectory_msgs::msg::JointTrajectory> JointTrajectoryController::set_hold_position(
+  const bool from_last_command)
+{
+  // Command to stay at the anchor position. A hardware component can declare a state interface
+  // and never write it, leaving NaN in the handle; never latch that straight into the command
   // interfaces.
-  if (!all_finite(state_current_.positions, num_cmd_joints_))
+  const auto anchor = select_hold_anchor(from_last_command);
+  if (!all_finite(anchor.positions, num_cmd_joints_))
   {
     RCLCPP_ERROR_THROTTLE(
       get_node()->get_logger(), *get_node()->get_clock(), 1000,
-      "Cannot hold position: the measured position is non-finite. Does the hardware write to "
+      "Cannot hold position: the anchor position is non-finite. Does the hardware write to "
       "every state interface it exports? Keeping the previous hold target.");
   }
   else
   {
-    hold_position_msg_ptr_->points[0].positions = state_current_.positions;
+    hold_position_msg_ptr_->points[0].positions = anchor.positions;
   }
 
   // set flag, otherwise tolerances will be checked with holding position too
@@ -2211,10 +2240,13 @@ JointTrajectoryController::set_hold_position()
 }
 
 std::shared_ptr<trajectory_msgs::msg::JointTrajectory>
-JointTrajectoryController::decelerate_to_hold_position()
+JointTrajectoryController::decelerate_to_hold_position(const bool from_last_command)
 {
-  const auto & p0 = state_current_.positions;
-  const auto & v0 = state_current_.velocities;
+  // p0 and v0 come from the same point: a commanded p0 with a measured v0 would leave a slope
+  // discontinuity at the join, the same defect one derivative up.
+  const auto anchor = select_hold_anchor(from_last_command);
+  const auto & p0 = anchor.positions;
+  const auto & v0 = anchor.velocities;
 
   // NaN would otherwise propagate silently: std::max(0.0, NaN) is 0.0, so max_t_stop stays
   // finite, every `t < stop_time_[i]` comparison below is false, and the whole ramp fills with a
@@ -2230,7 +2262,7 @@ JointTrajectoryController::decelerate_to_hold_position()
       (!positions_ok && !velocities_ok) ? "position and velocity are"
       : !positions_ok                   ? "position is"
                                         : "velocity is");
-    return set_hold_position();
+    return set_hold_position(from_last_command);
   }
 
   double max_t_stop = 0.0;
