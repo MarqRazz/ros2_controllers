@@ -18,6 +18,7 @@
 
 #include "joint_trajectory_controller/trajectory.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 
@@ -571,6 +572,14 @@ bool Trajectory::has_trajectory_msg() const { return trajectory_msg_.get() != nu
 bool Trajectory::has_nontrivial_msg() const
 {
   return has_trajectory_msg() && trajectory_msg_->points.size() > 1;
+}
+
+bool all_finite(const std::vector<double> & values, size_t count)
+{
+  return values.size() >= count &&
+         std::all_of(
+           values.cbegin(), values.cbegin() + static_cast<std::ptrdiff_t>(count),
+           [](double value) { return std::isfinite(value); });
 }
 
 }  // namespace joint_trajectory_controller
