@@ -57,6 +57,9 @@ joint_trajectory_controller
 * Added optional upsampling of positions-only action chunks, behind the new ``positions_upsampling.enable`` parameter (off by default). When enabled, positions-only messages on ``~/joint_trajectory`` are upsampled into a smooth global C2 cubic spline by solving the knot velocities, with timing synthesized from ``positions_upsampling.policy_frequency`` when absent. (`#2491 <https://github.com/ros-controls/ros2_controllers/pull/2491>`_)
 * Added a non-lambda ``all_finite()`` helper, replacing the inline ``isfinite`` lambdas duplicated across the non-finite-state guards. (`#TODO_PR_ALL_FINITE
   <https://github.com/ros-controls/ros2_controllers/pull/TODO_PR_ALL_FINITE>`_)
+* Fixed a NaN hazard in the zero-fill added in `#2043
+  <https://github.com/ros-controls/ros2_controllers/pull/2043>`_: that fix only fires when the velocity vector is empty, but a hardware component that declares a velocity state interface and never writes it reports back a present-but-NaN vector instead, which was passed straight into the first segment's cubic/quintic sampling. (`#TODO_PR_FIRST_SEGMENT_NAN
+  <https://github.com/ros-controls/ros2_controllers/pull/TODO_PR_FIRST_SEGMENT_NAN>`_)
 
 pid_controller
 **************
