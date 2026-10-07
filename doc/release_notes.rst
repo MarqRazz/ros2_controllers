@@ -60,6 +60,8 @@ joint_trajectory_controller
 * Fixed a NaN hazard in the zero-fill added in `#2043
   <https://github.com/ros-controls/ros2_controllers/pull/2043>`_: that fix only fires when the velocity vector is empty, but a hardware component that declares a velocity state interface and never writes it reports back a present-but-NaN vector instead, which was passed straight into the first segment's cubic/quintic sampling. (`#TODO_PR_FIRST_SEGMENT_NAN
   <https://github.com/ros-controls/ros2_controllers/pull/TODO_PR_FIRST_SEGMENT_NAN>`_)
+* ``set_hold_position``/``decelerate_to_hold_position`` now refuse to build a hold or a deceleration ramp from a non-finite measured position or velocity (a state interface a hardware component declared but never wrote), logging instead of silently commanding NaN to the hardware. (`#TODO_PR_HOLD_GUARD
+  <https://github.com/ros-controls/ros2_controllers/pull/TODO_PR_HOLD_GUARD>`_)
 
 pid_controller
 **************

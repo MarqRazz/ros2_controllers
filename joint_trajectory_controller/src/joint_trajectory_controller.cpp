@@ -2189,8 +2189,20 @@ void JointTrajectoryController::preempt_active_goal()
 std::shared_ptr<trajectory_msgs::msg::JointTrajectory>
 JointTrajectoryController::set_hold_position()
 {
-  // Command to stay at current position
-  hold_position_msg_ptr_->points[0].positions = state_current_.positions;
+  // Command to stay at current position. A hardware component can declare a state interface and
+  // never write it, leaving NaN in the handle; never latch that straight into the command
+  // interfaces.
+  if (!all_finite(state_current_.positions, num_cmd_joints_))
+  {
+    RCLCPP_ERROR_THROTTLE(
+      get_node()->get_logger(), *get_node()->get_clock(), 1000,
+      "Cannot hold position: the measured position is non-finite. Does the hardware write to "
+      "every state interface it exports? Keeping the previous hold target.");
+  }
+  else
+  {
+    hold_position_msg_ptr_->points[0].positions = state_current_.positions;
+  }
 
   // set flag, otherwise tolerances will be checked with holding position too
   rt_is_holding_ = true;
@@ -2201,9 +2213,27 @@ JointTrajectoryController::set_hold_position()
 std::shared_ptr<trajectory_msgs::msg::JointTrajectory>
 JointTrajectoryController::decelerate_to_hold_position()
 {
-  double max_t_stop = 0.0;
   const auto & p0 = state_current_.positions;
   const auto & v0 = state_current_.velocities;
+
+  // NaN would otherwise propagate silently: std::max(0.0, NaN) is 0.0, so max_t_stop stays
+  // finite, every `t < stop_time_[i]` comparison below is false, and the whole ramp fills with a
+  // NaN hold position that is written straight to the command interfaces.
+  const bool positions_ok = all_finite(p0, num_cmd_joints_);
+  const bool velocities_ok = all_finite(v0, num_cmd_joints_);
+  if (!positions_ok || !velocities_ok)
+  {
+    RCLCPP_ERROR_THROTTLE(
+      get_node()->get_logger(), *get_node()->get_clock(), 1000,
+      "Cannot compute a deceleration ramp: the measured %s non-finite. Does the hardware write "
+      "to every state interface it exports? Holding position instead.",
+      (!positions_ok && !velocities_ok) ? "position and velocity are"
+      : !positions_ok                   ? "position is"
+                                        : "velocity is");
+    return set_hold_position();
+  }
+
+  double max_t_stop = 0.0;
   for (size_t i = 0; i < num_cmd_joints_; ++i)
   {
     stop_direction_[i] = (v0[i] >= 0.0) ? 1.0 : -1.0;
